@@ -1,0 +1,33 @@
+*** Creating Trace Output File '.\Obj\bootloader.tra' Ok.
+### Preparing for ADS-LD.
+### Creating ADS-LD Command Line
+### List of Objects: adding '".\obj\core_cm3.o"'
+### List of Objects: adding '".\obj\system_stm32f10x.o"'
+### List of Objects: adding '".\obj\startup_stm32f10x_xl.o"'
+### List of Objects: adding '".\obj\main.o"'
+### List of Objects: adding '".\obj\stm32f10x_it.o"'
+### List of Objects: adding '".\obj\ftp.o"'
+### List of Objects: adding '".\obj\gprs_modem.o"'
+### List of Objects: adding '".\obj\fifo.o"'
+### List of Objects: adding '".\obj\button.o"'
+### List of Objects: adding '".\obj\dio_led.o"'
+### List of Objects: adding '".\obj\abs_address.o"'
+### List of Objects: adding '".\obj\misc.o"'
+### List of Objects: adding '".\obj\stm32f10x_flash.o"'
+### List of Objects: adding '".\obj\stm32f10x_crc.o"'
+### List of Objects: adding '".\obj\stm32f10x_gpio.o"'
+### List of Objects: adding '".\obj\stm32f10x_rcc.o"'
+### List of Objects: adding '".\obj\stm32f10x_usart.o"'
+### ADS-LD Command completed:
+--cpu Cortex-M3 ".\obj\core_cm3.o" ".\obj\system_stm32f10x.o" ".\obj\startup_stm32f10x_xl.o" ".\obj\main.o" ".\obj\stm32f10x_it.o" ".\obj\ftp.o" ".\obj\gprs_modem.o" ".\obj\fifo.o" ".\obj\button.o" ".\obj\dio_led.o" ".\obj\abs_address.o" ".\obj\misc.o" ".\obj\stm32f10x_flash.o" ".\obj\stm32f10x_crc.o" ".\obj\stm32f10x_gpio.o" ".\obj\stm32f10x_rcc.o" ".\obj\stm32f10x_usart.o" --strict --scatter ".\Obj\bootloader.sct" 
+--keep abs_address.o(.constdata) --summary_stderr --info summarysizes -o ".\Obj\bootloader.axf"### Preparing Environment (PrepEnvAds)
+### ADS-LD Output File: '.\Obj\bootloader.axf'
+### ADS-LD Command File: '.\Obj\bootloader.lnp'
+### Checking for dirty Components...
+### Creating CmdFile '.\Obj\bootloader.lnp', Handle=0x00000344
+### Writing '.lnp' file
+### ADS-LD Command file '.\Obj\bootloader.lnp' is ready.
+### ADS-LD: About to start ADS-LD Thread.
+### ADS-LD: executed with 0 errors
+### Updating obj list
+### LDADS_file() completed.

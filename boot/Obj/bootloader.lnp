@@ -1,0 +1,2 @@
+--cpu Cortex-M3 ".\obj\core_cm3.o" ".\obj\system_stm32f10x.o" ".\obj\startup_stm32f10x_xl.o" ".\obj\main.o" ".\obj\stm32f10x_it.o" ".\obj\ftp.o" ".\obj\gprs_modem.o" ".\obj\fifo.o" ".\obj\button.o" ".\obj\dio_led.o" ".\obj\abs_address.o" ".\obj\misc.o" ".\obj\stm32f10x_flash.o" ".\obj\stm32f10x_crc.o" ".\obj\stm32f10x_gpio.o" ".\obj\stm32f10x_rcc.o" ".\obj\stm32f10x_usart.o" --strict --scatter ".\Obj\bootloader.sct" 
+--keep abs_address.o(.constdata) --summary_stderr --info summarysizes -o ".\Obj\bootloader.axf"

@@ -1,0 +1,448 @@
+/******************** (C) COPYRIGHT 2008 STMicroelectronics ********************
+* File Name          : gps.c
+* Author             : MCD Application Team
+* Version            : V2.0.3
+* Date               : 09/22/2008
+* Description        : This file provides a set of functions needed to manage the
+*                      communication between SPI peripheral and SPI M25P64 FLASH.
+*/
+/* Includes ------------------------------------------------------------------*/
+#include "stm32f10x.h"
+#include <string.h>
+#include "stdlib.h"
+#include "gps.h"
+#include "fifoPackets.h"
+#include "packets.h"
+#include "packetsInner.h"
+#include "sdcardUser.h"
+#include "rtc.h"
+#include "hand_conf.h"
+#include "protocol_ascii.h"
+#include "protocol_bin.h"
+#include "hw_config.h"
+#include "bin_handle.h"
+#include "dio_led.h"
+#include "crc.h"
+
+
+u32  gpsTimerPacketValue;
+u8   gpsFlagTimerReady;
+
+node_struct nodesNavi[FIFO_PACKET_NAVI_SIZE];
+fifo_packet fifoNaviPack;
+
+extern u8       flagNoGSM;
+extern RTC_t    rtc;
+extern u8       bufNAVItoGSM[GPS_SENDING_BUFFER_SIZE];
+extern nmeaINFO info;
+extern u16      anglePrev;
+extern double   mileageExact;
+
+
+
+/*Receive buffer of packets from  GSM*/
+node_struct   nodesRcvPack[FIFO_PACKET_RECV_SIZE];
+fifo_packet   fifoRecBufPack;
+u8 bufRcvPacket[MAX_SIZE_PACKET_GPRS_SIM900];
+/*Receive buffer of bytes from USB*/
+u8 bufRcvUSB[USB_TX_DATA_SIZE];   /*operational buffer of USB*/
+u32 timerUSBPacketCheckValue;
+u8  usbFlagTimerReady;
+u32 timerGSMPacketCheckValue;
+u8  gsmFlagTimerReady;
+
+static u8 flagNAVIAppeared = 0;
+static u8 flagGSMAppeared = 0;
+static u8 flagVelLimitHandled = 0;
+
+
+extern bin_info  binInfo;
+extern configSet config;
+extern t_innerState innerState;
+
+u16 cap;  //tempora
+u8 getInfo(void)
+{
+  return cap;
+}
+//-------------------------------------------------------------------------------------------
+void gpsPacketQueueHandle(void)
+{
+   if(gpsTimerPacketValue)
+	  {
+	   gpsTimerPacketValue--;
+	   if(!gpsTimerPacketValue )
+	      gpsFlagTimerReady = 1;
+	  }
+}
+// ------------------------------------------------------------------------------
+void setTimerGPSPacket(u32 val)
+{
+   	gpsTimerPacketValue = val;
+}
+// ------------------------------------------------------------------------------
+void packetsIni(void)
+{
+	fifoPacketInit(&fifoNaviPack,nodesNavi,sizeof(nodesNavi)/sizeof(nodesNavi[0]));
+	fifoPacketInit(&fifoRecBufPack,nodesRcvPack,sizeof(nodesRcvPack)/sizeof(nodesRcvPack[0]));
+
+	setTimerGPSPacket(ONE_SEC * 5);
+    setTimerPackets(MS_100);
+    setTimerPacketsGSM(MS_100);
+
+	binInfo.fos.systemStart = 1;
+}
+//#define BLSd  4096
+//u8 bufSD[BLSd];
+// ------------------------------------------------------------------------------
+void naviPacketHandle(void)
+{
+   #if 0
+   u32 len;
+   static u16 cnt = 0;
+   static u16 c2 = 0;
+   u16 idx;
+   if(gpsFlagTimerReady) 
+     {
+	    gpsFlagTimerReady = 0;
+	    setTimerGPSPacket(ONE_SEC/2);
+
+		//if(cnt < 300)
+        len = readSDBlock(bufSD, 1025 );
+		/*
+		if(c2 == 0)
+		  for (idx = 0; idx < BLSd; idx++)
+		    bufSD[idx]  = idx;
+		if(cnt < 300)
+		   c2++;
+		  len = saveSDBlock(bufSD, 1000 + c2 * 1);
+		*/
+		cnt += 1;
+			   if(len)
+			     {
+				   //USBWriteChar(cnt / 100 + 0x30);
+				   //USBWriteChar((cnt % 100)/10 + 0x30);
+				   //USBWriteChar(cnt % 10 + 0x30);
+				   USBWriteChar(cnt/1000 + 0x30);
+				   USBWriteChar((cnt % 1000)/100 + 0x30);
+				   USBWriteChar((cnt % 100)/10 + 0x30);
+				   USBWriteChar(cnt % 10 + 0x30);
+
+				   USBWriteChar('L');
+				   USBWriteChar(len/1000 + 0x30);
+				   USBWriteChar((len % 1000)/100 + 0x30);
+				   USBWriteChar((len % 100)/10 + 0x30);
+				   USBWriteChar(len % 10 + 0x30);
+				   //USBWriteChar('\r');
+				   //USBWriteChar('\n');
+				   len = 0;
+			     }
+
+     }
+   #endif
+
+   #if 1
+   u16 lenData;
+   u8 flagEnablePutPacket;
+   static u32 cntEnablePutPacket = 0;
+   //u16 cap;
+   static u8 localCNT = 0;
+//   u8 sign;
+   static u8 dayCurr = 0;
+   static u16 metersCounter = 0;
+   u16  debugga;
+   u8 i = 0;
+   //u16    teLen;
+   if(gpsFlagTimerReady) 
+     {
+	    gpsFlagTimerReady = 0;
+	    setTimerGPSPacket(ONE_SEC/2);	   //TIME_INTRV_GPS_QUERY
+
+		cap = fifoPacketCount(&fifoNaviPack);
+
+		/* Analyse if packets > 0.75 of whole buffer and there is no GSM - we put packets in file
+		analyse every second  */
+		if( (cap > (FIFO_PACKET_NAVI_SIZE * 0.75)) && (flagNoGSM) )	   // 
+		  {
+		     memset(bufNAVItoGSM,0,sizeof(bufNAVItoGSM));
+             lenData = fifoPacketGet(&fifoNaviPack, bufNAVItoGSM );
+			 saveSDInfo(bufNAVItoGSM, lenData, SD_NOTSEND, SD_TYPE_MSG_GSM);
+		  }
+		/* Analyse if packets < 0.25 of whole buffer and there is GSM - we get packets from file
+		analyse every second  */ //should set flag of time setting
+	    if( (cap < (FIFO_PACKET_NAVI_SIZE * 0.25)) && (!flagNoGSM) )	   // 
+		  {
+		    lenData = 1;
+		    while((i < (FIFO_PACKET_NAVI_SIZE - cap-2)) && (lenData))
+			 {
+			     i++;
+			     memset(bufNAVItoGSM,0,sizeof(bufNAVItoGSM));
+				 lenData = readSDInfo(bufNAVItoGSM, sizeof(bufNAVItoGSM));
+				 debugga = lenData; 
+				 if(debugga)
+				   {
+//					   USBWriteChar('L');
+//					   USBWriteChar(debugga/1000 + 0x30);
+//					   USBWriteChar((debugga % 1000)/100 + 0x30);
+//					   USBWriteChar((debugga % 100)/10 + 0x30);
+//					   USBWriteChar(debugga % 10 + 0x30);
+
+					   //USBWriteChar('\r');
+					   //USBWriteChar('\n');
+					   debugga = 0;
+				   }
+				 if(lenData)
+				    fifoPacketPut(&fifoNaviPack,bufNAVItoGSM, lenData);
+			 }
+			   
+		  }
+
+		/* Make some records about GLONASS Appear/disappear */
+		if(info.sig == NMEA_SIG_BAD)  /* No, we loose GPS */
+		   {
+		      if(flagNAVIAppeared)
+				  {
+			         flagNAVIAppeared = 0;
+					 saveSDInfo((u8 *)"GPS LOOSE ",strlen((const char *)"GPS LOOSE "), SD_SENDED, SD_TYPE_MSG_LOG);
+					 saveSDInfo((u8 *)readRTCTime(&rtc),strlen((const char *)readRTCTime(&rtc)), SD_SENDED, SD_TYPE_MSG_LOG);
+			      }
+			  binInfo.fos.naviLost = 1;
+	       }
+	    else					      /* Yes, we got GPS */
+		   {
+		      if(!flagNAVIAppeared)
+				  {
+			         flagNAVIAppeared = 1;
+					 saveSDInfo((u8 *)"GPS FIND ",strlen((const char *)"GPS FIND "), SD_SENDED, SD_TYPE_MSG_LOG);
+					 saveSDInfo((u8 *)readRTCTime(&rtc),strlen((const char *)readRTCTime(&rtc)), SD_SENDED, SD_TYPE_MSG_LOG);
+			      }
+
+			  /* Handle speed limit */
+			  if(info.speed > config.velocityLimit)
+			     {
+				   if(!flagVelLimitHandled)
+					  {
+					    /* Here we make added packets*/ 
+						//memset(bufNAVItoGSM,0,GPS_SENDING_BUFFER_SIZE);
+						//lenData = prepareData(bufNAVItoGSM);
+					    //fifoPacketPut(&fifoNaviPack,bufNAVItoGSM, lenData, getGLONASSStateValid());
+						flagVelLimitHandled = 1;
+						flagEnablePutPacket = 1;
+						binInfo.fos.vehicleSpeedExceed = 1;
+					  }
+				 }
+			   else if(info.speed < (config.velocityLimit - 3))
+				    flagVelLimitHandled = 0;
+			  /* Handle angle limit */
+			  if((info.speed > 5) && (abs(anglePrev - info.direction) > config.angleLimit) )
+			     {
+					    /* Here we make added packets*/ 
+						//memset(bufNAVItoGSM,0,GPS_SENDING_BUFFER_SIZE);
+						//lenData = prepareData(bufNAVItoGSM);
+					    //fifoPacketPut(&fifoNaviPack,bufNAVItoGSM, lenData, getGLONASSStateValid());
+						flagEnablePutPacket = 1;
+						binInfo.fos.courseChanged = 1;
+				 }
+			   anglePrev = info.direction;
+			  /* Handle distance limit */
+			  metersCounter = (u32)(mileageExact);  //
+			  if(metersCounter > config.distanceLimit)
+			     {
+				        metersCounter = 0;
+					    /* Here we make added packets*/ 
+						//memset(bufNAVItoGSM,0,GPS_SENDING_BUFFER_SIZE);
+						//lenData = prepareData(bufNAVItoGSM);
+					    //fifoPacketPut(&fifoNaviPack,bufNAVItoGSM, lenData, getGLONASSStateValid());
+						flagEnablePutPacket = 1;
+						binInfo.fos.distPassed = 1;
+				 }
+
+
+		   }
+		/* Make some records about GPRS Appear/disappear */
+		if(flagNoGSM)  /* No, we loose GPRS */
+		   {
+		      if(flagGSMAppeared)
+				  {
+			         flagGSMAppeared = 0;
+					 saveSDInfo((u8 *)"GPRS LOOSE ",strlen((const char *)"GPRS LOOSE "), SD_SENDED, SD_TYPE_MSG_LOG);
+					 saveSDInfo((u8 *)readRTCTime(&rtc),strlen((const char *)readRTCTime(&rtc)), SD_SENDED, SD_TYPE_MSG_LOG);
+			      }
+			  binInfo.fos.GPRSLost = 1;
+		   }
+	    else					      /* Yes, we got GPRS */
+		   {
+		      if(!flagGSMAppeared)
+				  {
+			         flagGSMAppeared = 1;
+					 saveSDInfo((u8 *)"GPRS FIND ",strlen((const char *)"GPRS FIND "), SD_SENDED, SD_TYPE_MSG_LOG);
+					 saveSDInfo((u8 *)readRTCTime(&rtc),strlen((const char *)readRTCTime(&rtc)), SD_SENDED, SD_TYPE_MSG_LOG);
+			      }
+		   }
+		
+		//analyse in interval (5 sec)  (*2 - because localCnt happened every 0.5 s)
+		if(++localCNT >= ((config.intervalSendingPower * 2)))
+		 {
+			localCNT = 0;
+			/* If no GPS and there is GSM - we made packets */
+			if(info.sig == NMEA_SIG_BAD)
+			  {
+			   if(!flagNoGSM)
+			     {
+					flagEnablePutPacket = 0;
+					cntEnablePutPacket++;
+					if(cntEnablePutPacket == 1)
+						flagEnablePutPacket = 1;
+					else if(cntEnablePutPacket == 2)
+						flagEnablePutPacket = 1;
+					else if(cntEnablePutPacket == 4)
+						flagEnablePutPacket = 1;
+					else if(cntEnablePutPacket == 8)
+						flagEnablePutPacket = 1;
+					else if(cntEnablePutPacket  == 16)
+						flagEnablePutPacket = 1;
+					else if((cntEnablePutPacket % 32) == 0)
+						flagEnablePutPacket = 1;
+			     }
+			  } 
+			else   /* Yes, we got GPS */
+			  {
+			    cntEnablePutPacket = 0;
+			    flagEnablePutPacket = 1;
+			  }
+	
+			if(flagEnablePutPacket)
+			  {
+			    flagEnablePutPacket = 0;
+			    //USBWriteStr(readRTCTime(&rtc));  //debugga
+			    /* Here we make main stream of packets*/ 
+				memset(bufNAVItoGSM,0,sizeof(bufNAVItoGSM));
+ 				lenData = prepareData(bufNAVItoGSM, 0);	 // 0 -self init
+ 			    fifoPacketPut(&fifoNaviPack,bufNAVItoGSM, lenData);
+				/* Here we save all good(GPS Valid) packets*/
+				if(getGLONASSStateValid())
+				  {
+					if(dayCurr != info.utc.day) /* and correct time*/
+					  {
+					     dayCurr = info.utc.day;
+					     rtcCorrectTimeFromGLONASS(&rtc, &info);
+					  }
+				    saveSDInfo(bufNAVItoGSM, lenData, SD_SENDED, SD_TYPE_MSG_GSM);
+				  }
+			  }
+			
+		 }
+	 }
+#endif
+}
+/*******************************************************************************/
+/* 	Execute from GSM 								           */
+/*******************************************************************************/
+void rcvPacketHandle(void)
+{
+  u8 cap;
+  //u8 sign;
+  u16 lenData;
+  if(gsmFlagTimerReady)
+    {
+	  gsmFlagTimerReady = 0;
+	  setTimerPacketsGSM(MS_10);
+	  //todo : here i should make timer every 100ms
+	  cap = fifoPacketCount(&fifoRecBufPack);
+	  if(cap)
+	   {
+	     /*get raw binary packet*/
+	     lenData = fifoPacketGet(&fifoRecBufPack, bufRcvPacket );
+		 /*Handling of all kinds*/
+		 //lenData = unstuffData(bufRcvPacket,lenData);
+	     /*Get cmd,id,len, check crc and execute*/
+	      if( lenData >= MIN_BYTES_GSM )
+	        {
+	
+	           if(
+	            (( bufRcvPacket[3] ) | (bufRcvPacket[2] << 8) | (bufRcvPacket[1] << 16) | (bufRcvPacket[0] << 24) == blockID) &&   
+	            (*(u32*)&bufRcvPacket[lenData-4] == calcBlock(bufRcvPacket,lenData-4))
+	             )  
+	            {
+	               /*Get cmd,id,len, check crc and execute*/
+	               lenData = getCmd(bufRcvPacket, lenData);
+				   /* put handled packet into the send packet buffer*/
+				   fifoPacketPut(&fifoNaviPack,bufNAVItoGSM, lenData);
+	            }
+	        }
+	   }
+    }
+}
+/*******************************************************************************/
+/* 	Execute from USB 								           */
+/*******************************************************************************/
+void rcvPacketHandleUSB(void)
+{
+  //u32 crc = 1; //temporarily
+  u16  lenData;
+  if(usbFlagTimerReady)
+    {
+      usbFlagTimerReady = 0;
+      setTimerPackets(MS_10);
+       /*get raw binary packet*/
+       lenData = USBReadWhole(bufRcvUSB);
+
+      if( lenData >= MIN_BYTES_USB )
+        {
+
+           if(
+            (bufRcvUSB[0] == PILOT_BYTE) &&   
+            (*(u32*)&bufRcvUSB[lenData-4] == calcBlock(bufRcvUSB,lenData-4))
+             )  
+            {
+               /*Get cmd,id,len, check crc and execute*/
+        	   lenData = getCmdUSB(bufRcvUSB);
+               /* put handled packet into the send packet buffer*/
+			   USBWriteLen(bufRcvUSB,lenData);
+            }
+        }
+      //else if( (lenData ) && (lenData < MIN_BYTES_USB) )
+      // led_mid(BOARD_LED_XOR);   
+    }
+}  
+/*******************************************************************************/
+/* 																			   */
+/*******************************************************************************/
+void handleTimerPackets(void)
+{
+    if(timerUSBPacketCheckValue)
+	  {
+	   timerUSBPacketCheckValue--;
+	   if(!timerUSBPacketCheckValue )
+		  {
+	       usbFlagTimerReady = 1; 
+			
+		  }
+	  }
+    if(timerGSMPacketCheckValue)
+	  {
+	   timerGSMPacketCheckValue--;
+	   if(!timerGSMPacketCheckValue )
+		  {
+	       gsmFlagTimerReady = 1; 
+			
+		  }
+	  }
+
+}
+/*******************************************************************************/
+/* 																			   */
+/*******************************************************************************/
+void setTimerPackets(u32 val)
+{
+   	timerUSBPacketCheckValue = val;
+}
+/*******************************************************************************/
+/* 																			   */
+/*******************************************************************************/
+void setTimerPacketsGSM(u32 val)
+{
+   	timerGSMPacketCheckValue = val;
+}
+
+
